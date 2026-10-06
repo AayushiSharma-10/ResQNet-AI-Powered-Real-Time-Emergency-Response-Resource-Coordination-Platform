@@ -1,0 +1,376 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  CITIZEN
+  RESPONDER
+  DISPATCHER
+  HOSPITAL
+  ADMINISTRATOR
+  EMERGENCY_AUTHORITY
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum IncidentType {
+  MEDICAL
+  FIRE
+  ROAD_ACCIDENT
+  CRIME
+  NATURAL_DISASTER
+  FLOOD
+  EARTHQUAKE
+  MISSING_PERSON
+  INFRASTRUCTURE_FAILURE
+  OTHER
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  RECEIVED
+  TRIAGE_COMPLETE
+  DISPATCHED
+  EN_ROUTE
+  ON_SCENE
+  RESOLVING
+  RESOLVED
+  CLOSED
+}
+
+enum ResourceStatus {
+  AVAILABLE
+  EN_ROUTE
+  ON_SCENE
+  TRANSPORTING
+  MAINTENANCE
+  OFFLINE
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  REGISTER
+  INCIDENT_CREATE
+  INCIDENT_UPDATE
+  RESOURCE_ASSIGN
+  DISPATCH
+  ALERT_CREATE
+  ALERT_UPDATE
+  FILE_UPLOAD
+  AUTH_CHANGE
+  SYSTEM
+}
+
+model User {
+  id                     String    @id @default(uuid())
+  email                  String    @unique
+  phone                  String?   @unique
+  passwordHash           String
+  firstName              String
+  lastName               String
+  role                   RoleName
+  status                 UserStatus @default(ACTIVE)
+  mfaEnabled             Boolean   @default(false)
+  lastLoginAt            DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  deletedAt              DateTime?
+  lastKnownLocationLat   Float?
+  lastKnownLocationLng   Float?
+
+  incidentsCreated       Incident[] @relation("IncidentCreator")
+  incidentsReported      Incident[] @relation("IncidentReporter")
+  incidentAssignments    IncidentAssignment[] @relation("IncidentAssignedTo")
+  assignmentsCreated     IncidentAssignment[] @relation("IncidentAssignedBy")
+  dispatchAssignments    Dispatch[] @relation("DispatchAssignedTo")
+  notifications          Notification[]
+  auditLogs              AuditLog[]
+  fileUploads            FileUpload[]
+  responderProfile       ResponderProfile?
+  hospitalProfile        HospitalProfile?
+  refreshTokens          RefreshToken[]
+
+  @@index([role])
+  @@index([email])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RolePermission {
+  id        String   @id @default(uuid())
+  role      RoleName
+  action    String
+  createdAt DateTime @default(now())
+
+  @@unique([role, action])
+}
+
+model ResponderProfile {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  teamName      String?
+  unitNumber    String?
+  specialty     String?
+  vehicleId     String?
+  isAvailable   Boolean  @default(true)
+  currentLat    Float?
+  currentLng    Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model HospitalProfile {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  facilityName  String
+  region        String?
+  emergencyBeds Int      @default(0)
+  icuBeds       Int      @default(0)
+  totalCapacity Int      @default(0)
+  latitude      Float?
+  longitude     Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  capacityLogs  HospitalCapacityLog[]
+}
+
+model Incident {
+  id                 String             @id @default(uuid())
+  incidentNumber     String             @unique
+  type               IncidentType
+  severity           IncidentSeverity
+  status             IncidentStatus     @default(RECEIVED)
+  title              String
+  description        String
+  locationName       String?
+  latitude           Float?
+  longitude          Float?
+  priorityScore      Float?
+  estimatedResponseTime Int?
+  reportedById       String?
+  createdById        String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  closedAt           DateTime?
+  source             String             @default("app")
+
+  createdBy          User?              @relation("IncidentCreator", fields: [createdById], references: [id])
+  reportedBy         User?              @relation("IncidentReporter", fields: [reportedById], references: [id])
+  updates            IncidentUpdate[]
+  assignments        IncidentAssignment[]
+  dispatches         Dispatch[]
+  alerts             Alert[]
+  notifications      Notification[]
+  aiAssessments      AIAssessment[]
+  mediaUploads       FileUpload[]
+
+  @@index([status, severity])
+  @@index([latitude, longitude])
+  @@index([createdAt])
+}
+
+model IncidentUpdate {
+  id            String   @id @default(uuid())
+  incidentId    String
+  authorName    String
+  content       String
+  timestamp     DateTime @default(now())
+  status        IncidentStatus?
+
+  incident      Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, timestamp])
+}
+
+model IncidentAssignment {
+  id            String   @id @default(uuid())
+  incidentId    String
+  responderId   String?
+  resourceType  String?
+  resourceId    String?
+  assignedById  String
+  status        String   @default("assigned")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  incident      Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  responder     User?    @relation("IncidentAssignedTo", fields: [responderId], references: [id])
+  assignedBy    User     @relation("IncidentAssignedBy", fields: [assignedById], references: [id])
+
+  @@index([incidentId])
+}
+
+model Dispatch {
+  id              String   @id @default(uuid())
+  incidentId      String
+  dispatchType    String
+  resourceType    String
+  resourceId      String?
+  assignedToUserId String?
+  status          String   @default("pending")
+  etaMinutes      Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  incident        Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  assignedToUser  User?    @relation("DispatchAssignedTo", fields: [assignedToUserId], references: [id])
+
+  @@index([incidentId])
+}
+
+model Resource {
+  id              String        @id @default(uuid())
+  resourceType    String
+  name            String
+  status          ResourceStatus @default(AVAILABLE)
+  capacity        Int?
+  currentLoad     Int?
+  locationName    String?
+  latitude        Float?
+  longitude       Float?
+  availability    Boolean        @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([resourceType, status])
+}
+
+model Alert {
+  id             String    @id @default(uuid())
+  title          String
+  description    String
+  severity       IncidentSeverity
+  area           String?
+  targetAudience String?
+  startTime      DateTime
+  expiryTime     DateTime?
+  isActive       Boolean   @default(true)
+  createdById    String?
+  incidentId     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  incident       Incident? @relation(fields: [incidentId], references: [id])
+
+  @@index([isActive, startTime])
+}
+
+model Notification {
+  id           String             @id @default(uuid())
+  userId       String?
+  incidentId   String?
+  title        String
+  message      String
+  channel      NotificationChannel @default(IN_APP)
+  status       NotificationStatus @default(PENDING)
+  metadata     Json?
+  createdAt    DateTime           @default(now())
+  readAt       DateTime?
+
+  user         User?              @relation(fields: [userId], references: [id])
+  incident     Incident?          @relation(fields: [incidentId], references: [id])
+
+  @@index([userId, status])
+}
+
+model FileUpload {
+  id            String   @id @default(uuid())
+  incidentId    String?
+  uploadedById  String?
+  filename      String
+  originalName  String
+  mimeType      String
+  sizeBytes     Int
+  storageKey    String
+  status        String   @default("uploaded")
+  createdAt     DateTime @default(now())
+
+  incident      Incident? @relation(fields: [incidentId], references: [id])
+  uploadedBy    User?     @relation(fields: [uploadedById], references: [id])
+}
+
+model HospitalCapacityLog {
+  id            String   @id @default(uuid())
+  hospitalId    String
+  emergencyBeds Int
+  icuBeds       Int
+  totalCapacity Int
+  timestamp     DateTime @default(now())
+
+  hospital      HospitalProfile @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+}
+
+model AIAssessment {
+  id               String   @id @default(uuid())
+  incidentId       String
+  assessmentType   String
+  model            String
+  confidence       Float
+  score            Float?
+  result           Json
+  requiresHumanConfirmation Boolean @default(false)
+  createdAt        DateTime @default(now())
+
+  incident         Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, assessmentType])
+}
+
+model AuditLog {
+  id           String      @id @default(uuid())
+  userId       String?
+  action       AuditAction
+  entityType   String?
+  entityId     String?
+  details      Json?
+  previousState Json?
+  newState     Json?
+  createdAt    DateTime    @default(now())
+
+  user         User?       @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+}

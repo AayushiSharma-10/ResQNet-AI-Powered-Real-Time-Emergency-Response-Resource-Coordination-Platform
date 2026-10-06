@@ -1,0 +1,7 @@
+// frontend
+Set-Location "C:\Users\HP\Desktop\Project\ResQNet-AI-Powered Real-Time Emergency Response & Resource Coordination Platform\frontend"
+>> npm run dev
+
+//backend
+Set-Location "C:\Users\HP\Desktop\Project\ResQNet-AI-Powered Real-Time Emergency Response & Resource Coordination Platform\backend"
+>> npm run dev
